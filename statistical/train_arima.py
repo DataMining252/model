@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import numpy as np
 import pickle
@@ -8,6 +9,8 @@ from statsmodels.tsa.stattools import adfuller
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from pmdarima import auto_arima
 
+# Tự động tạo thư mục models nếu chưa có
+os.makedirs("models", exist_ok=True)
 
 # =========================
 # Load data
@@ -34,6 +37,9 @@ test = test.asfreq("D")
 train = train.ffill()
 test = test.ffill()
 
+# --- CHỈ DỰ BÁO 1 TUẦN (7 NGÀY) ---
+forecast_steps = 7
+test_1_week = test.iloc[:forecast_steps]
 
 # =========================
 # ADF Test
@@ -43,7 +49,6 @@ result = adfuller(train)
 
 print("ADF Statistic:", result[0])
 print("p-value:", result[1])
-
 
 # =========================
 # BASELINE MODEL: ARIMA(1,1,1)
@@ -56,11 +61,12 @@ arima_fit = arima_model.fit()
 
 print(arima_fit.summary())
 
-forecast_arima = arima_fit.forecast(steps=len(test))
-forecast_arima = pd.Series(forecast_arima.values, index=test.index)
+# Sửa lại số bước dự báo và khớp index của 7 ngày
+forecast_arima = arima_fit.forecast(steps=forecast_steps)
+forecast_arima = pd.Series(forecast_arima.values, index=test_1_week.index)
 
-rmse_arima = np.sqrt(mean_squared_error(test, forecast_arima))
-mae_arima = mean_absolute_error(test, forecast_arima)
+rmse_arima = np.sqrt(mean_squared_error(test_1_week, forecast_arima))
+mae_arima = mean_absolute_error(test_1_week, forecast_arima)
 
 print("ARIMA RMSE:", rmse_arima)
 print("ARIMA MAE:", mae_arima)
@@ -82,7 +88,6 @@ auto_model = auto_arima(
 
 print(auto_model.summary())
 
-
 # Train best ARIMA
 best_order = auto_model.order
 print("Best ARIMA order:", best_order)
@@ -90,14 +95,13 @@ print("Best ARIMA order:", best_order)
 best_arima = ARIMA(train, order=best_order)
 best_fit = best_arima.fit()
 
-forecast_auto = best_fit.forecast(steps=len(test))
-forecast_auto = pd.Series(forecast_auto.values, index=test.index)
-
+# Sửa lại số bước dự báo và khớp index của 7 ngày
+forecast_auto = best_fit.forecast(steps=forecast_steps)
+forecast_auto = pd.Series(forecast_auto.values, index=test_1_week.index)
 
 # Evaluate Auto ARIMA
-
-rmse_auto = np.sqrt(mean_squared_error(test, forecast_auto))
-mae_auto = mean_absolute_error(test, forecast_auto)
+rmse_auto = np.sqrt(mean_squared_error(test_1_week, forecast_auto))
+mae_auto = mean_absolute_error(test_1_week, forecast_auto)
 
 print("\nAUTO ARIMA RMSE:", rmse_auto)
 print("AUTO ARIMA MAE:", mae_auto)
@@ -107,10 +111,10 @@ print("AUTO ARIMA MAE:", mae_auto)
 # Save best model
 # =========================
 
-with open("statistical/models/arima_gold_model.pkl", "wb") as f:
+with open("models/arima_gold_model.pkl", "wb") as f:
     pickle.dump(best_fit, f)
 
-print("Best model saved to statistical/models/arima_gold_model.pkl")
+print("Best model saved to models/arima_gold_model.pkl")
 
 
 # =========================
@@ -132,13 +136,16 @@ print("Auto ARIMA MAE:", mae_auto)
 
 plt.figure(figsize=(12,6))
 
-plt.plot(train, label="Train")
-plt.plot(test, label="Test")
+# MẸO: Chỉ vẽ 90 ngày cuối của tập train để dễ nhìn đoạn nối tiếp 1 tuần
+train_plot = train.iloc[-90:]
 
-plt.plot(test.index, forecast_arima, label="ARIMA(1,1,1)")
-plt.plot(test.index, forecast_auto, label="Auto ARIMA")
+plt.plot(train_plot.index, train_plot, label="Train (90 ngày cuối)")
+plt.plot(test_1_week.index, test_1_week, label="Test (1 Tuần thực tế)", marker='o')
+
+plt.plot(test_1_week.index, forecast_arima, label="ARIMA(1,1,1)", linestyle='--')
+plt.plot(test_1_week.index, forecast_auto, label="Auto ARIMA", linestyle='--')
 
 plt.legend()
-plt.title("ARIMA vs Auto ARIMA Forecast")
-
+plt.title("ARIMA vs Auto ARIMA Forecast (1 Tuần)")
+plt.grid(True)
 plt.show()
