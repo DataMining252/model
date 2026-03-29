@@ -5,7 +5,7 @@ from statsmodels.tsa.stattools import adfuller
 from statsmodels.tsa.stattools import kpss
 
 # CLEAN DATA
-df = pd.read_csv("XAU_1d_data.csv", sep=";")
+df = pd.read_csv("raw/XAU_1d_data.csv", sep=";")
 df.columns = df.columns.str.strip()
 
 df["Date"] = pd.to_datetime(df["Date"], format="%Y.%m.%d %H:%M")
@@ -56,9 +56,9 @@ print("KPSS Statistic:", kpss_result[0])
 print("p-value:", kpss_result[1])
 
 # EXPORT DATA
-df2.reset_index().to_csv("gold_cleaned.csv", index=False)
+df2.reset_index().to_csv("raw/gold_cleaned.csv", index=False)
 
 df2["Month"] = df2.index.month
 df2["Quarter"] = df2.index.quarter
 df2["DayOfWeek"] = df2.index.day_name()
-df2.reset_index().to_csv("gold_with_season.csv", index=False)
+df2.reset_index().to_csv("raw/gold_with_season.csv", index=False)
