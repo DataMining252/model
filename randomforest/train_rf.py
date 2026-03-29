@@ -1,122 +1,186 @@
+import os
 import pandas as pd
 import numpy as np
 import pickle
-from pathlib import Path
+import matplotlib.pyplot as plt
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
-# Config
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-MODEL_DIR = BASE_DIR / "models"
+# ======================
+# CONFIG
+# ======================
+DATA_PATH = "../raw/final_dataset.csv"
+MODEL_PATH = "./models/rf_model.pkl"
 
-DATA_DIR.mkdir(exist_ok=True)
-MODEL_DIR.mkdir(exist_ok=True)
+WINDOW_SIZE = 1500
+STEP = 150
+HORIZON = 7
 
-DATASET_PATH = BASE_DIR.parent / 'gold_with_season.csv'
-
-# Load data set
-df = pd.read_csv(DATASET_PATH)
-df["Date"] = pd.to_datetime(df["Date"])
+# ======================
+# LOAD DATA
+# ======================
+df = pd.read_csv(DATA_PATH, parse_dates=["Date"])
 df = df.sort_values("Date")
-df["Date"] = pd.to_datetime(df["Date"])
 
-df["DayOfWeek"] = df["Date"].dt.dayofweek
-df["Month"] = df["Date"].dt.month
-df["Quarter"] = df["Date"].dt.quarter
+# ======================
+# FEATURE ENGINEERING
+# ======================
 
-# Feature engineering
-## Lag feature
-df["Close_lag1"] = df["Close"].shift(1)
-df["Close_lag2"] = df["Close"].shift(2)
-df["Close_lag3"] = df["Close"].shift(3)
-df["Close_lag7"] = df["Close"].shift(7)
-df["Close_lag14"] = df["Close"].shift(14)
+# Log return + SCALE
+df["log_return"] = np.log(df["Close"] / df["Close"].shift(1))
+df["log_return_scaled"] = df["log_return"] * 100
 
-## Technical indicators
-df["MA7"] = df["Close"].rolling(7).mean()
-df["MA14"] = df["Close"].rolling(14).mean()
-df["STD7"] = df["Close"].rolling(7).std()
+# Clip outlier
+df["log_return_scaled"] = df["log_return_scaled"].clip(-5, 5)
 
-df["Return"] = df["Close"].pct_change()
+# Lag
+for lag in [1, 2, 3, 7, 14]:
+    df[f"log_return_lag_{lag}"] = df["log_return_scaled"].shift(lag)
+    df[f"close_lag_{lag}"] = df["Close"].shift(lag)
 
-# Create target
-for i in range (1, 8):
-    df[f"Target_{i}"] = df["Close"].shift(-i)
+# Trend + momentum
+df["ma_10"] = df["Close"].rolling(10).mean()
+df["ma_20"] = df["Close"].rolling(20).mean()
+df["trend"] = df["ma_10"] - df["ma_20"]
+df["momentum"] = df["Close"] - df["Close"].shift(10)
 
-# Drop NA
+# Volatility
+df["volatility"] = df["log_return_scaled"].rolling(10).std()
+
+# Short-term signals
+df["return_2"] = df["log_return_scaled"].rolling(2).mean()
+df["return_5"] = df["log_return_scaled"].rolling(5).mean()
+
+# ======================
+# TARGET
+# ======================
+for i in range(1, HORIZON + 1):
+    df[f"target_{i}"] = df["log_return_scaled"].shift(-i)
+
 df = df.dropna()
 
-# Select features
-features = [
-    "Open",
-    "High",
-    "Low",
-    "Volume",
+# ======================
+# FEATURES
+# ======================
+targets = [f"target_{i}" for i in range(1, HORIZON + 1)]
+features = [col for col in df.columns if col not in ["Date"] and not col.startswith("target")]
 
-    "Month",
-    "Quarter",
-    "DayOfWeek",
+# ======================
+# WALK-FORWARD
+# ======================
+all_preds = []
+all_actuals = []
 
-    "Close_lag1",
-    "Close_lag2",
-    "Close_lag3",
-    "Close_lag7",
-    "Close_lag14",
+for start in range(0, len(df) - WINDOW_SIZE - HORIZON, STEP):
+    print(f"Processing window {start}/{len(df)}")
 
-    "MA7",
-    "MA14",
-    "STD7",
-    "Return",
-]
+    train_df = df.iloc[start : start + WINDOW_SIZE]
+    test_df  = df.iloc[start + WINDOW_SIZE : start + WINDOW_SIZE + STEP]
 
-X = df[features]
+    X_train = train_df[features]
+    y_train = train_df[targets]
 
-y = df[[f"Target_{i}" for i in range(1, 8)]]
+    X_test = test_df[features]
+    y_test = test_df[targets]
 
-# Train-test split
-split = int(len(df) * 0.8)
-X_train = X[:split]
-X_test = X[split:]
-y_train = y[:split]
-y_test = y[split:]
+    model = RandomForestRegressor(
+        n_estimators=200,
+        max_depth=20,
+        min_samples_leaf=2,
+        min_samples_split=4,
+        random_state=42,
+        n_jobs=-1
+    )
 
-X_train.to_csv(DATA_DIR / "X_train.csv", index=False)
-X_test.to_csv(DATA_DIR / "X_test.csv", index=False)
+    model.fit(X_train, y_train)
 
-y_train.to_csv(DATA_DIR / "y_train.csv", index=False)
-y_test.to_csv(DATA_DIR / "y_test.csv", index=False)
+    preds = model.predict(X_test)
+    preds = pd.DataFrame(preds, columns=targets, index=y_test.index)
 
-print("Train/Test datasets saved.")
+    all_preds.append(preds)
+    all_actuals.append(y_test)
 
-# Train model
-model = RandomForestRegressor(
-    n_estimators=500,
-    max_depth=20,
-    min_samples_split=5,
-    random_state=42,
-    n_jobs=-1
-)
-model.fit(X_train, y_train)
+# ======================
+# CONCAT
+# ======================
+preds_df = pd.concat(all_preds)
+actual_df = pd.concat(all_actuals)
 
-# Predict
-pred = model.predict(X_test)
+print("Walk-forward done!")
 
-# Evaluate
-
-mae = mean_absolute_error(y_test, pred)
-rmse = np.sqrt(mean_squared_error(y_test, pred))
-mape = np.mean(np.abs((y_test - pred) / y_test)) * 100
-
-print("===== Random Forest Evaluation =====")
-print("MAE :", mae)
-print("RMSE:", rmse)
-print("MAPE:", mape)
-
-# Save model
-MODEL_PATH = MODEL_DIR / "rf_gold.pkl"
+# ======================
+# SAVE MODEL
+# ======================
+os.makedirs("models", exist_ok=True)
 with open(MODEL_PATH, "wb") as f:
     pickle.dump(model, f)
 
-print("\nModel saved at:", MODEL_PATH)
+print(f"Model saved to {MODEL_PATH}")
+
+# ======================
+# METRICS
+# ======================
+print("\n=== METRICS ===")
+
+for i in range(1, HORIZON + 1):
+    mae = mean_absolute_error(actual_df[f"target_{i}"], preds_df[f"target_{i}"])
+    rmse = np.sqrt(mean_squared_error(actual_df[f"target_{i}"], preds_df[f"target_{i}"]))
+
+    print(f"Day +{i}: MAE={mae:.4f}, RMSE={rmse:.4f}")
+
+# Direction accuracy
+direction_acc = (np.sign(preds_df) == np.sign(actual_df)).mean()
+print("\nDirection accuracy:")
+print(direction_acc)
+
+# ======================
+# SMOOTH FUNCTION
+# ======================
+def smooth(x, window=10):
+    return pd.Series(x).rolling(window).mean()
+
+# ======================
+# PLOT
+# ======================
+plt.figure(figsize=(14, 12))
+
+for i in range(1, HORIZON + 1):
+    plt.subplot(4, 2, i)
+
+    actual = actual_df[f"target_{i}"].values
+    pred = preds_df[f"target_{i}"].values
+
+    plt.plot(smooth(actual), label="Actual (smooth)")
+    plt.plot(smooth(pred), label="Predicted (smooth)")
+
+    plt.title(f"Day +{i}")
+    plt.legend()
+    plt.grid()
+
+plt.tight_layout()
+plt.show()
+
+# ======================
+# SCATTER
+# ======================
+plt.close("all")
+plt.figure(figsize=(14, 12))
+
+for i in range(1, HORIZON + 1):
+    plt.subplot(4, 2, i)
+
+    actual = actual_df[f"target_{i}"]
+    pred = preds_df[f"target_{i}"]
+
+    plt.scatter(actual, pred, alpha=0.5)
+
+    min_val = min(actual.min(), pred.min())
+    max_val = max(actual.max(), pred.max())
+    plt.plot([min_val, max_val], [min_val, max_val])
+
+    plt.title(f"Scatter Day +{i}")
+    plt.grid()
+
+plt.tight_layout()
+plt.show()
