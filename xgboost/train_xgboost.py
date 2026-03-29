@@ -1,159 +1,198 @@
-from pathlib import Path
-
 import pandas as pd
 import numpy as np
+import xgboost as xgb
 import joblib
 
-from xgboost import XGBRegressor
-from sklearn.metrics import mean_absolute_error, root_mean_squared_error, r2_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import matplotlib.pyplot as plt
 
-# Config
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-MODEL_DIR = BASE_DIR / "models"
+# ======================
+# CONFIG
+# ======================
+DATA_PATH = "../raw/final_dataset.csv"
+MODEL_PATH = "./models/xgb_model.pkl"
 
-DATA_DIR.mkdir(exist_ok=True)
-MODEL_DIR.mkdir(exist_ok=True)
+# ======================
+# LOAD DATA
+# ======================
+df = pd.read_csv(DATA_PATH)
+df['Date'] = pd.to_datetime(df['Date'])
+df = df.sort_values('Date')
 
-DATASET_PATH = BASE_DIR.parent / 'gold_with_season.csv'
+# ======================
+# FEATURE ENGINEERING
+# ======================
+def create_features(df):
+    df = df.copy()
 
-# Load data set
-df = pd.read_csv(DATASET_PATH)
-df["Date"] = pd.to_datetime(df["Date"])
-df = df.sort_values("Date")
+    # Lag
+    for lag in range(1, 15):
+        df[f'lag_{lag}'] = df['Close'].shift(lag)
 
-# Feature engineering
-## Lag features
-for i in range(1, 15):
-        df[f'lag_{i}'] = df['Close'].shift(i)
+    # Rolling
+    df['ma_7'] = df['Close'].rolling(7).mean()
+    df['std_7'] = df['Close'].rolling(7).std()
 
-## Rolling statistics
-df['rolling_mean_7'] = df['Close'].rolling(7).mean()
-df['rolling_mean_30'] = df['Close'].rolling(30).mean()
-df['rolling_std_7'] = df['Close'].rolling(7).std()
+    # Return
+    df['return_1'] = df['Close'].pct_change(1)
+    df['return_7'] = df['Close'].pct_change(7)
 
-df['rolling_max_7'] = df['Close'].rolling(7).max()
-df['rolling_min_7'] = df['Close'].rolling(7).min()
+    # Momentum
+    df['momentum_7'] = df['Close'] - df['Close'].shift(7)
 
-df['day_of_week'] = df['Date'].dt.dayofweek   # 0=Mon, 6=Sun
-df['month'] = df['Date'].dt.month
+    return df
 
-df["price_range_7"] = df["Close"].rolling(7).max() - df["Close"].rolling(7).min()
-df["trend_7"] = df["Close"] - df["Close"].shift(7)
+df = create_features(df)
 
-
-## Return
-df['return'] = df['Close'].pct_change()
-
-# Multi-step targets
+# ======================
+# TARGET (RETURN 7 DAYS)
+# ======================
 for i in range(1, 8):
-        df[f'target_{i}'] = df['Close'].pct_change(i).shift(-i)
+    df[f'target_{i}'] = df['Close'].pct_change(i).shift(-i)
 
 df = df.dropna()
 
-# Features
-feature_cols = [
-    col for col in df.columns
-    if col.startswith('lag_') 
-    or 'rolling' in col 
-    or col in ['return', 'day_of_week', 'month', 'price_range_7', 'trend_7']
-]
-feature_cols.append('Close')
+# ======================
+# FEATURES
+# ======================
+features = [col for col in df.columns if
+            'lag_' in col or 'ma_' in col or 'std_' in col
+            or 'return_' in col or 'momentum_' in col]
 
-# Train test split
-split_idx = int(len(df) * 0.8)
-
-train_df = df.iloc[:split_idx]
-test_df = df.iloc[split_idx:]
-
-X_train = train_df[feature_cols]
-X_test = test_df[feature_cols]
-
-X_train.to_csv(DATA_DIR / "X_train.csv", index=False)
-X_test.to_csv(DATA_DIR / "X_test.csv", index=False)
-
-# y_train.to_csv(DATA_DIR / "y_train.csv", index=False)
-# y_test.to_csv(DATA_DIR / "y_test.csv", index=False)
-
-# Train model
-model_dict = {}
-preds = pd.DataFrame(index=X_test.index)
-
-print("Training models...\n")
-for i in range(1, 8):
-        print(f"Training model for day +{i}")
-        y_train = train_df[f'target_{i}']
-        y_test = test_df[f'target_{i}']
-
-        model = XGBRegressor(
-                n_estimators=1000,
-                learning_rate=0.01,
-                max_depth=6,
-                subsample=0.9,
-                colsample_bytree=0.9,
-                reg_alpha=0.1,
-                reg_lambda=1,
-                random_state=42,
-                n_jobs=-1
-        )
-
-        model.fit(
-                X_train, y_train,
-                eval_set=[(X_test, y_test)],
-                verbose=False
-        )
-        y_pred = model.predict(X_test)
-
-        model_dict[f'day_{i}'] = model
-
-        preds[f'pred_{i}'] = y_pred
-
-        # Metrics
-        mae = mean_absolute_error(y_test, y_pred)
-        rmse = root_mean_squared_error(y_test, y_pred)
-        r2 = r2_score(y_test, y_pred)
-
-        print(f"Day +{i} -> MAE: {mae:.2f}, RMSE: {rmse:.2f}, R2: {r2:.4f}\n")
+# thêm macro features nếu có
+macro_cols = ['DXY', 'SP500', 'OIL', 'INTEREST_RATE', 'CPI']
+for col in macro_cols:
+    if col in df.columns:
+        features.append(col)
 
 # ======================
-# SAVE MODELS
+# TRAIN
 # ======================
-print("Saving models...")
+models = {}
 
 for i in range(1, 8):
-    joblib.dump(model_dict[f'day_{i}'], MODEL_DIR / f"xgb_day_{i}.pkl")
+    print(f"Training Day +{i}")
 
-print("All models saved!")
+    X = df[features]
+    y = df[f'target_{i}']
 
-last_close = df['Close'].iloc[split_idx - 1]
+    split = int(len(df) * 0.8)
 
-price_preds = []
+    X_train, X_test = X[:split], X[split:]
+    y_train, y_test = y[:split], y[split:]
+
+    model = xgb.XGBRegressor(
+        n_estimators=200,
+        max_depth=4,
+        learning_rate=0.05,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=42
+    )
+
+    model.fit(X_train, y_train)
+    models[i] = model
+
+# ======================
+# SAVE MODEL
+# ======================
+joblib.dump({
+    "models": models,
+    "features": features
+}, MODEL_PATH)
+
+print("Saved model!")
+
+# ======================
+# EVALUATION (PRICE LEVEL)
+# ======================
+fig, axes = plt.subplots(4, 2, figsize=(15, 12))
+axes = axes.flatten()
 
 for i in range(1, 8):
-    returns = preds[f'pred_{i}'].values
-    
-    # convert return -> price
-    prices = last_close * (1 + returns)
-    price_preds.append(prices)
+    model = models[i]
 
-price_preds = np.array(price_preds).T
+    X = df[features]
+    y_return = df[f'target_{i}']
 
-import matplotlib.pyplot as plt
-plt.figure(figsize=(14,8))
-last_close_series = test_df['Close'].shift(0).values
+    split = int(len(df) * 0.8)
+    X_test = X[split:]
+    y_return_test = y_return[split:]
+
+    # predict return
+    y_pred_return = model.predict(X_test)
+
+    # convert to price
+    base_prices = df['Close'].shift(1)[split:]  # giá hôm trước
+
+    y_true_price = base_prices * (1 + y_return_test)
+    y_pred_price = base_prices * (1 + y_pred_return)
+
+    # metrics
+    mae = mean_absolute_error(y_true_price, y_pred_price)
+    rmse = np.sqrt(mean_squared_error(y_true_price, y_pred_price))
+    r2 = r2_score(y_true_price, y_pred_price)
+
+    print(f"\nDay +{i}")
+    print(f"MAE : {mae:.2f}")
+    print(f"RMSE: {rmse:.2f}")
+    print(f"R2  : {r2:.4f}")
+
+    ax = axes[i-1]
+    ax.plot(y_true_price.values[-100:], label="Actual")
+    ax.plot(y_pred_price.values[-100:], label="Pred")
+
+    ax.set_title(f"Day +{i} | R2={r2:.2f}")
+    ax.grid()
+
+# remove extra plot
+fig.delaxes(axes[7])
+
+handles, labels = axes[0].get_legend_handles_labels()
+fig.legend(handles, labels, loc='upper right')
+
+plt.tight_layout()
+plt.show()
+
+fig, axes = plt.subplots(4, 2, figsize=(12, 12))
+axes = axes.flatten()
+
 for i in range(1, 8):
-    plt.subplot(4, 2, i)
+    model = models[i]
 
-    actual = test_df[f'target_{i}'].values
-    pred = preds[f'pred_{i}'].values
+    X = df[features]
+    y_return = df[f'target_{i}']
 
-    actual_price = last_close_series * (1 + actual)
-    pred_price = last_close_series * (1 + pred)
+    split = int(len(df) * 0.8)
+    X_test = X[split:]
+    y_return_test = y_return[split:]
 
-    plt.plot(actual_price, label="Actual")
-    plt.plot(pred_price, label="Pred")
+    # predict return
+    y_pred_return = model.predict(X_test)
 
-    plt.title(f"Day +{i}")
+    # convert to price
+    base_prices = df['Close'].shift(1)[split:]
+
+    y_true_price = base_prices * (1 + y_return_test)
+    y_pred_price = base_prices * (1 + y_pred_return)
+
+    ax = axes[i-1]
+
+    # scatter
+    ax.scatter(y_true_price, y_pred_price, alpha=0.5)
+
+    # đường y = x
+    min_val = min(y_true_price.min(), y_pred_price.min())
+    max_val = max(y_true_price.max(), y_pred_price.max())
+    ax.plot([min_val, max_val], [min_val, max_val], linestyle='--')
+
+    ax.set_title(f"Day +{i}")
+    ax.set_xlabel("Actual")
+    ax.set_ylabel("Predicted")
+    ax.grid()
+
+# xóa ô thừa
+fig.delaxes(axes[7])
 
 plt.tight_layout()
 plt.show()
