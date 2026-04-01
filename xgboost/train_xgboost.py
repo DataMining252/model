@@ -9,8 +9,16 @@ import matplotlib.pyplot as plt
 # ======================
 # CONFIG
 # ======================
-DATA_PATH = "../raw/final_dataset.csv"
-MODEL_PATH = "./models/xgb_model.pkl"
+from pathlib import Path
+
+# Base dir = thư mục chứa file train_xgboost.py
+BASE_DIR = Path(__file__).resolve().parent
+
+# ../raw/final_dataset.csv
+DATA_PATH = BASE_DIR.parent / "raw" / "final_dataset.csv"
+
+# ./models/xgb_model.pkl
+MODEL_PATH = BASE_DIR / "models" / "xgb_model.pkl"
 
 # ======================
 # LOAD DATA
