@@ -8,8 +8,16 @@ from sklearn.ensemble import RandomForestRegressor
 # ======================
 # CONFIG
 # ======================
-DATA_PATH = "../raw/final_dataset.csv"
-MODEL_PATH = "./models/rf_recursive_7day.pkl"
+from pathlib import Path
+
+# Thư mục chứa file .py hiện tại
+BASE_DIR = Path(__file__).resolve().parent
+
+# ../raw/final_dataset.csv
+DATA_PATH = BASE_DIR.parent / "raw" / "final_dataset.csv"
+
+# ./models/rf_recursive_7day.pkl
+MODEL_PATH = BASE_DIR / "models" / "rf_recursive_7day.pkl"
 
 WINDOW_SIZE = 1500
 STEP = 150

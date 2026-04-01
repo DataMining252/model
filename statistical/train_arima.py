@@ -15,9 +15,16 @@ os.makedirs("models", exist_ok=True)
 # =========================
 # Load data
 # =========================
+from pathlib import Path
 
-train_df = pd.read_csv("statistical/data/gold_train.csv")
-test_df = pd.read_csv("statistical/data/gold_test.csv")
+BASE_DIR = Path(__file__).resolve().parent
+
+# statistical/data/...
+TRAIN_PATH = BASE_DIR / "statistical" / "data" / "gold_train.csv"
+TEST_PATH  = BASE_DIR / "statistical" / "data" / "gold_test.csv"
+
+train_df = pd.read_csv(TRAIN_PATH)
+test_df  = pd.read_csv(TEST_PATH)
 
 train_df["Date"] = pd.to_datetime(train_df["Date"])
 test_df["Date"] = pd.to_datetime(test_df["Date"])

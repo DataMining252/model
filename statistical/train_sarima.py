@@ -11,13 +11,24 @@ from pmdarima import auto_arima
 # Tự động tạo thư mục models nếu chưa có
 os.makedirs("models", exist_ok=True)
 
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+
+# statistical/data/...
+TRAIN_EXOG_PATH = BASE_DIR / "statistical" / "data" / "gold_train_exog.csv"
+TEST_EXOG_PATH  = BASE_DIR / "statistical" / "data" / "gold_test_exog.csv"
+
+train_df = pd.read_csv(TRAIN_PATH)
+test_df  = pd.read_csv(TEST_PATH)
+
 # =========================
 # 1. Load dữ liệu MỚI (có chứa biến ngoại sinh)
 # =========================
 print("Đang tải dữ liệu...")
 # Lưu ý: Đổi tên file thành file _exog mà chúng ta vừa tạo
-train_df = pd.read_csv("statistical/data/gold_train_exog.csv")
-test_df = pd.read_csv("statistical/data/gold_test_exog.csv")
+train_df = pd.read_csv(TRAIN_EXOG_PATH)
+test_df  = pd.read_csv(TEST_EXOG_PATH)
 
 train_df["Date"] = pd.to_datetime(train_df["Date"])
 test_df["Date"] = pd.to_datetime(test_df["Date"])

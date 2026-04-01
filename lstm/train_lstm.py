@@ -10,12 +10,21 @@ import os
 # ======================
 # CONFIG
 # ======================
-DATA_PATH = "../raw/final_dataset.csv"
 WINDOW_SIZE = 60
 HORIZON = 7
 EPOCHS = 50
 LR = 0.001
-MODEL_PATH = "./models/lstm_price_model_final.pth"
+
+from pathlib import Path
+
+# Thư mục chứa file .py hiện tại
+BASE_DIR = Path(__file__).resolve().parent
+
+# ../raw/final_dataset.csv
+DATA_PATH = BASE_DIR.parent / "raw" / "final_dataset.csv"
+
+# ./models/lstm_price_model_final.pth
+MODEL_PATH = BASE_DIR / "models" / "lstm_price_model_final.pth"
 
 os.makedirs("./models", exist_ok=True)
 
