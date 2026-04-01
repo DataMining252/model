@@ -32,7 +32,7 @@ jobs:
       run: pip install -r api/requirements.txt
 
     - name: Train XGBoost model
-      run: python xgboost/train_xgb.py
+      run: python xgboost/train_xgboost.py
 
     - name: Train LSTM model
       run: python lstm/train_lstm.py
