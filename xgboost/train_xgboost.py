@@ -104,6 +104,8 @@ for i in range(1, 8):
 # ======================
 # SAVE MODEL
 # ======================
+MODEL_PATH = Path(MODEL_PATH)
+MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
 joblib.dump({
     "models": models,
     "features": features

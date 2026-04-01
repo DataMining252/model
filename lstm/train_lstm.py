@@ -117,6 +117,8 @@ for epoch in range(EPOCHS):
 # ======================
 # SAVE MODEL
 # ======================
+MODEL_PATH = Path(MODEL_PATH)
+MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
 torch.save({
     'model_state_dict': model.state_dict(),
     'input_features': features,
