@@ -12,7 +12,7 @@ jobs:
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      IMAGE_NAME: nguyentienphat2904/gold-price:latest
+      IMAGE_NAME: nguyenphat2904/gold-price:latest
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
       RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
 
