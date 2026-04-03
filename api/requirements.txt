@@ -1,19 +1,28 @@
-# FastAPI và server
+# FastAPI
 fastapi
 uvicorn[standard]
 
-# Xử lý dữ liệu
+# Data
 pandas
 numpy
 scipy
 
-# Machine learning
+# ML
 scikit-learn
 xgboost
 torch
 joblib
 
+# Visualization (có thể bỏ nếu không dùng trong API)
 matplotlib
 seaborn
 
+# Time series
 pmdarima
+
+# Database
+sqlalchemy
+psycopg2-binary
+
+# Env
+python-dotenv
