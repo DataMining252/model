@@ -28,6 +28,9 @@ MODEL_PATH = BASE_DIR / "models" / "lstm_price_model_final.pth"
 
 os.makedirs("./models", exist_ok=True)
 
+SAVE_DIR = BASE_DIR / "results"
+SAVE_DIR.mkdir(exist_ok=True)
+
 # ======================
 # LOAD DATA
 # ======================
@@ -161,7 +164,8 @@ fig.delaxes(axes[7])
 handles, labels = axes[0].get_legend_handles_labels()
 fig.legend(handles, labels)
 plt.tight_layout()
-plt.show()
+plt.savefig(SAVE_DIR / "lstm_line_plot.png")
+plt.close()
 
 # ======================
 # SCATTER PLOT
@@ -183,4 +187,5 @@ for i in range(HORIZON):
     ax.grid(True)
 fig.delaxes(axes[7])
 plt.tight_layout()
-plt.show()
+plt.savefig(SAVE_DIR / "lstm_scatter_plot.png")
+plt.close()
