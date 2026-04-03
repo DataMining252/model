@@ -37,15 +37,6 @@ jobs:
     - name: Train LSTM model
       run: python lstm/train_lstm.py
 
-    - name: Train RandomForest model
-      run: python randomforest/train_rf.py
-
-    - name: Train ARIMA model
-      run: python statistical/train_arima.py
-
-    - name: Train SARIMA model
-      run: python model/train_sarima.py
-
     - name: Login to Docker Hub
       uses: docker/login-action@v3
       with:

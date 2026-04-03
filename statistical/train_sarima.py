@@ -19,9 +19,6 @@ BASE_DIR = Path(__file__).resolve().parent
 TRAIN_EXOG_PATH = BASE_DIR / "statistical" / "data" / "gold_train_exog.csv"
 TEST_EXOG_PATH  = BASE_DIR / "statistical" / "data" / "gold_test_exog.csv"
 
-train_df = pd.read_csv(TRAIN_PATH)
-test_df  = pd.read_csv(TEST_PATH)
-
 # =========================
 # 1. Load dữ liệu MỚI (có chứa biến ngoại sinh)
 # =========================

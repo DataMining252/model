@@ -34,7 +34,7 @@ def load_historical_data_from_db(
 
     engine = create_engine(DB_CONN_STR)
 
-    gold_cols = ['open','high','low','close','volume']
+    gold_cols = ['open','high','low','close']
     feature_cols = ['dxy','sp500','oil','interest_rate','cpi']
 
     # -------- SELECT COLUMNS --------

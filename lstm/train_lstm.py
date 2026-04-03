@@ -45,7 +45,7 @@ df['rolling_std_7'] = df['Close'].rolling(7).std()
 df = df.dropna()
 
 features = [
-    'Open','High','Low','Close','Volume','DXY','SP500','OIL','INTEREST_RATE','CPI',
+    'Open','High','Low','Close','DXY','SP500','OIL','INTEREST_RATE','CPI',
     'High-Low','Close-Open','rolling_mean_7','rolling_std_7'
 ]
 
