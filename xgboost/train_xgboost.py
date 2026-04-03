@@ -20,6 +20,9 @@ DATA_PATH = BASE_DIR.parent / "raw" / "final_dataset.csv"
 # ./models/xgb_model.pkl
 MODEL_PATH = BASE_DIR / "models" / "xgb_model.pkl"
 
+SAVE_DIR = BASE_DIR / "results"
+SAVE_DIR.mkdir(exist_ok=True)
+
 # ======================
 # LOAD DATA
 # ======================
@@ -162,7 +165,8 @@ handles, labels = axes[0].get_legend_handles_labels()
 fig.legend(handles, labels, loc='upper right')
 
 plt.tight_layout()
-plt.show()
+plt.savefig(SAVE_DIR / "xgb_line_plot.png")
+plt.close()
 
 fig, axes = plt.subplots(4, 2, figsize=(12, 12))
 axes = axes.flatten()
@@ -205,4 +209,5 @@ for i in range(1, 8):
 fig.delaxes(axes[7])
 
 plt.tight_layout()
-plt.show()
+plt.savefig(SAVE_DIR / "xgb_scatter_plot.png")
+plt.close()
