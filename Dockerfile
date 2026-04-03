@@ -9,11 +9,11 @@ COPY . .
 
 # Install dependencies
 RUN pip install --no-cache-dir --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r api/requirements.txt
 
 # Train models khi build image (optional)
-RUN python model/lstm/train_lstm.py
-RUN python model/xgboost/train_xgb.py
+# RUN python model/lstm/train_lstm.py
+# RUN python model/xgboost/train_xgb.py
 
 # Expose port cho Render
 EXPOSE 8000
