@@ -4,6 +4,7 @@ import numpy as np
 import pickle
 import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 # ======================
 # CONFIG
@@ -113,6 +114,41 @@ for start in range(0, len(df) - WINDOW_SIZE - HORIZON, STEP):
 columns_horizon = [f"Day+{i}" for i in range(1,HORIZON+1)]
 price_preds_horizon = pd.DataFrame(all_preds_horizon, columns=columns_horizon)
 price_actuals_horizon = pd.DataFrame(all_actuals_horizon, columns=columns_horizon)
+
+# ======================
+# METRICS (MAE, RMSE, R2)
+# ======================
+metrics = []
+
+for i in range(HORIZON):
+    actual = price_actuals_horizon[f"Day+{i+1}"].values
+    pred   = price_preds_horizon[f"Day+{i+1}"].values
+
+    # remove NaN (do last rows)
+    mask = ~np.isnan(actual) & ~np.isnan(pred)
+    actual = actual[mask]
+    pred   = pred[mask]
+
+    mae = mean_absolute_error(actual, pred)
+    rmse = np.sqrt(mean_squared_error(actual, pred))
+    r2 = r2_score(actual, pred)
+
+    metrics.append({
+        "Horizon": f"Day+{i+1}",
+        "MAE": mae,
+        "RMSE": rmse,
+        "R2": r2
+    })
+
+# Convert to DataFrame
+metrics_df = pd.DataFrame(metrics)
+
+print("\n===== RANDOM FOREST METRICS =====")
+print(metrics_df)
+
+# Optional: average metrics
+print("\n===== AVERAGE METRICS =====")
+print(metrics_df[["MAE","RMSE","R2"]].mean())
 
 # ======================
 # SAVE MODEL

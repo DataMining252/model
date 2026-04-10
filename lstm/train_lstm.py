@@ -2,34 +2,27 @@ import pandas as pd
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import matplotlib.pyplot as plt
-import os
+from pathlib import Path
 
 # ======================
 # CONFIG
 # ======================
 WINDOW_SIZE = 60
 HORIZON = 7
-EPOCHS = 50
+EPOCHS = 100
 LR = 0.001
+PATIENCE = 10
 
-from pathlib import Path
-
-# Thư mục chứa file .py hiện tại
 BASE_DIR = Path(__file__).resolve().parent
-
-# ../raw/final_dataset.csv
 DATA_PATH = BASE_DIR.parent / "raw" / "final_dataset.csv"
-
-# ./models/lstm_price_model_final.pth
-MODEL_PATH = BASE_DIR / "models" / "lstm_price_model_final.pth"
-
-os.makedirs("./models", exist_ok=True)
-
 SAVE_DIR = BASE_DIR / "results"
 SAVE_DIR.mkdir(exist_ok=True)
+
+MODEL_PATH = BASE_DIR / "models" / "lstm_price_model_final.pth"
+MODEL_PATH.parent.mkdir(exist_ok=True)
 
 # ======================
 # LOAD DATA
@@ -41,94 +34,132 @@ df = df.sort_values('Date')
 # ======================
 # FEATURE ENGINEERING
 # ======================
+# ✅ LOG RETURN (QUAN TRỌNG)
+df['log_return'] = np.log(df['Close'] / df['Close'].shift(1))
+
 df['High-Low'] = df['High'] - df['Low']
 df['Close-Open'] = df['Close'] - df['Open']
-df['rolling_mean_7'] = df['Close'].rolling(7).mean()
-df['rolling_std_7'] = df['Close'].rolling(7).std()
+
+df['ma_7'] = df['Close'].rolling(7).mean()
+df['ma_14'] = df['Close'].rolling(14).mean()
+df['std_7'] = df['Close'].rolling(7).std()
+
 df = df.dropna()
 
 features = [
-    'Open','High','Low','Close','DXY','SP500','OIL','INTEREST_RATE','CPI',
-    'High-Low','Close-Open','rolling_mean_7','rolling_std_7'
+    'log_return','High-Low','Close-Open',
+    'ma_7','ma_14','std_7',
+    'DXY','SP500','OIL'
 ]
 
 X_data = df[features].values
-y_data = df['Close'].values.reshape(-1,1)  # dự đoán giá trực tiếp
+y_data = df['log_return'].values.reshape(-1,1)
 
 # ======================
-# SCALE
+# SPLIT
+# ======================
+n = len(X_data)
+train_end = int(n*0.7)
+val_end = int(n*0.8)
+
+# ======================
+# SCALE (NO LEAKAGE)
 # ======================
 scaler_X = MinMaxScaler()
-scaler_y = MinMaxScaler()
+scaler_y = StandardScaler()  # ✅ FIX
 
-X_scaled = scaler_X.fit_transform(X_data)
-y_scaled = scaler_y.fit_transform(y_data)
+scaler_X.fit(X_data[:train_end])
+scaler_y.fit(y_data[:train_end])
+
+X_scaled = scaler_X.transform(X_data)
+y_scaled = scaler_y.transform(y_data)
 
 # ======================
-# CREATE SEQUENCES
+# CREATE SEQUENCE
 # ======================
 def create_sequences(X, y, window, horizon):
     X_seq, y_seq = [], []
     for i in range(len(X)-window-horizon):
         X_seq.append(X[i:i+window])
-        y_seq.append(y[i+window:i+window+horizon, 0])  # flatten last dim
+        y_seq.append(y[i+window:i+window+horizon, 0])
     return np.array(X_seq), np.array(y_seq)
 
 X_seq, y_seq = create_sequences(X_scaled, y_scaled, WINDOW_SIZE, HORIZON)
 
-# ======================
-# SPLIT TRAIN/TEST
-# ======================
-split = int(len(X_seq)*0.8)
-X_train, X_test = X_seq[:split], X_seq[split:]
-y_train, y_test = y_seq[:split], y_seq[split:]
+# split
+n_seq = len(X_seq)
+train_end = int(n_seq*0.7)
+val_end = int(n_seq*0.8)
 
+X_train, y_train = X_seq[:train_end], y_seq[:train_end]
+X_val, y_val = X_seq[train_end:val_end], y_seq[train_end:val_end]
+X_test, y_test = X_seq[val_end:], y_seq[val_end:]
+
+# tensor
 X_train = torch.FloatTensor(X_train)
 y_train = torch.FloatTensor(y_train)
+X_val = torch.FloatTensor(X_val)
+y_val = torch.FloatTensor(y_val)
 X_test = torch.FloatTensor(X_test)
 y_test = torch.FloatTensor(y_test)
 
 # ======================
-# LSTM MODEL
+# MODEL
 # ======================
 class LSTMModel(nn.Module):
     def __init__(self, input_size):
         super().__init__()
-        self.lstm = nn.LSTM(input_size=input_size, hidden_size=256, num_layers=2, batch_first=True, dropout=0.2)
-        self.fc = nn.Linear(256, HORIZON)
+        self.lstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=64,
+            num_layers=1,
+            batch_first=True
+        )
+        self.fc = nn.Linear(64, HORIZON)
+
     def forward(self, x):
         out, _ = self.lstm(x)
-        out = out[:, -1, :]  # lấy output timestep cuối
+        out = out[:, -1, :]
         return self.fc(out)
 
-model = LSTMModel(input_size=len(features))
-criterion = nn.MSELoss()
+model = LSTMModel(len(features))
+
+# ✅ FIX LOSS
+criterion = nn.HuberLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 
 # ======================
-# TRAIN
+# TRAIN + EARLY STOPPING
 # ======================
+best_val_loss = float('inf')
+patience_counter = 0
+
 for epoch in range(EPOCHS):
     model.train()
     optimizer.zero_grad()
-    pred_train = model(X_train)
-    loss = criterion(pred_train, y_train)
+    pred = model(X_train)
+    loss = criterion(pred, y_train)
     loss.backward()
     optimizer.step()
-    print(f"Epoch {epoch+1}/{EPOCHS}, Loss: {loss.item():.6f}")
 
-# ======================
-# SAVE MODEL
-# ======================
-MODEL_PATH = Path(MODEL_PATH)
-MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-torch.save({
-    'model_state_dict': model.state_dict(),
-    'input_features': features,
-    'window_size': WINDOW_SIZE,
-    'horizon': HORIZON
-}, MODEL_PATH)
-print(f"LSTM model saved to {MODEL_PATH}")
+    model.eval()
+    with torch.no_grad():
+        val_pred = model(X_val)
+        val_loss = criterion(val_pred, y_val)
+
+    print(f"Epoch {epoch+1} | Train: {loss.item():.6f} | Val: {val_loss.item():.6f}")
+
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+        patience_counter = 0
+        torch.save(model.state_dict(), MODEL_PATH)
+    else:
+        patience_counter += 1
+        if patience_counter >= PATIENCE:
+            print("Early stopping!")
+            break
+
+model.load_state_dict(torch.load(MODEL_PATH))
 
 # ======================
 # PREDICT
@@ -136,56 +167,72 @@ print(f"LSTM model saved to {MODEL_PATH}")
 model.eval()
 with torch.no_grad():
     y_pred_scaled = model(X_test).numpy()
+
 y_test_np = y_test.numpy()
 
 # ======================
 # INVERSE SCALE
 # ======================
-y_pred = scaler_y.inverse_transform(y_pred_scaled)
-y_true = scaler_y.inverse_transform(y_test_np)
+y_pred_log = scaler_y.inverse_transform(y_pred_scaled)
+y_true_log = scaler_y.inverse_transform(y_test_np)
 
 # ======================
-# LINE PLOT
+# RECONSTRUCT PRICE (LOG RETURN)
+# ======================
+start_idx = val_end + WINDOW_SIZE
+base_prices = df['Close'].values[start_idx:start_idx+len(y_pred_log)]
+
+def reconstruct_price(base, log_returns):
+    prices = []
+    for i in range(len(log_returns)):
+        p = base[i]
+        seq = []
+        for r in log_returns[i]:
+            p = p * np.exp(r)  # ✅ FIX
+            seq.append(p)
+        prices.append(seq)
+    return np.array(prices)
+
+y_pred_price = reconstruct_price(base_prices, y_pred_log)
+y_true_price = reconstruct_price(base_prices, y_true_log)
+
+# ======================
+# EVALUATE
+# ======================
+print("\n===== LSTM METRICS =====")
+for i in range(HORIZON):
+    mae = mean_absolute_error(y_true_price[:,i], y_pred_price[:,i])
+    rmse = np.sqrt(mean_squared_error(y_true_price[:,i], y_pred_price[:,i]))
+    r2 = r2_score(y_true_price[:,i], y_pred_price[:,i])
+    print(f"Day+{i+1}: MAE={mae:.2f}, RMSE={rmse:.2f}, R2={r2:.3f}")
+
+# ======================
+# CHECK BIAS
+# ======================
+bias = np.mean(y_pred_price - y_true_price)
+print("\nBias:", bias)
+
+# ======================
+# PLOT
 # ======================
 fig, axes = plt.subplots(4, 2, figsize=(15,12))
 axes = axes.flatten()
+
 for i in range(HORIZON):
     ax = axes[i]
-    actual = y_true[:,i]
-    pred = y_pred[:,i]
+    actual = y_true_price[:, i]
+    pred = y_pred_price[:, i]
+
     ax.plot(actual[-100:], label="Actual")
     ax.plot(pred[-100:], linestyle="--", label="Predicted")
-    mae = mean_absolute_error(actual, pred)
-    rmse = np.sqrt(mean_squared_error(actual, pred))
-    r2 = r2_score(actual, pred)
-    ax.set_title(f"Day +{i+1} | MAE={mae:.2f}, RMSE={rmse:.2f}, R²={r2:.2f}")
+
+    ax.set_title(f"Day +{i+1}")
     ax.grid(True)
+
 fig.delaxes(axes[7])
 handles, labels = axes[0].get_legend_handles_labels()
 fig.legend(handles, labels)
+
 plt.tight_layout()
 plt.savefig(SAVE_DIR / "lstm_line_plot.png")
-plt.close()
-
-# ======================
-# SCATTER PLOT
-# ======================
-fig, axes = plt.subplots(4, 2, figsize=(15,12))
-axes = axes.flatten()
-for i in range(HORIZON):
-    ax = axes[i]
-    actual = y_true[:,i]
-    pred = y_pred[:,i]
-    ax.scatter(actual[-100:], pred[-100:], alpha=0.7, s=20)
-    ax.plot([actual.min(), actual.max()], [actual.min(), actual.max()], 'r--')  # y=x line
-    mae = mean_absolute_error(actual, pred)
-    rmse = np.sqrt(mean_squared_error(actual, pred))
-    r2 = r2_score(actual, pred)
-    ax.set_title(f"Day +{i+1} | MAE={mae:.2f}, RMSE={rmse:.2f}, R²={r2:.2f}")
-    ax.set_xlabel("Actual Price")
-    ax.set_ylabel("Predicted Price")
-    ax.grid(True)
-fig.delaxes(axes[7])
-plt.tight_layout()
-plt.savefig(SAVE_DIR / "lstm_scatter_plot.png")
 plt.close()
