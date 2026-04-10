@@ -17,7 +17,8 @@ xgb_features = xgb_bundle["features"]
 # ---------- LSTM ----------
 lstm_bundle = torch.load(
     os.path.join(BASE_DIR, "..", "lstm", "models", "lstm_price_model_final.pth"),
-    map_location="cpu"
+    map_location="cpu",
+    weights_only=False
 )
 
 lstm_features = lstm_bundle["input_features"]
@@ -32,23 +33,22 @@ scaler_y = lstm_bundle.get("scaler_y", None)
 
 # ================= MODEL =================
 class LSTMModel(torch.nn.Module):
-    def __init__(self, input_size, horizon):
+    def __init__(self, input_size):
         super().__init__()
         self.lstm = torch.nn.LSTM(
             input_size=input_size,
-            hidden_size=256,
-            num_layers=2,
-            batch_first=True,
-            dropout=0.2
+            hidden_size=64,
+            num_layers=1,
+            batch_first=True
         )
-        self.fc = torch.nn.Linear(256, horizon)
+        self.fc = torch.nn.Linear(64, HORIZON)
 
     def forward(self, x):
         out, _ = self.lstm(x)
         return self.fc(out[:, -1, :])
 
 
-lstm_model = LSTMModel(len(lstm_features), HORIZON)
+lstm_model = LSTMModel(len(lstm_features))
 lstm_model.load_state_dict(lstm_bundle["model_state_dict"])
 lstm_model.eval()
 
@@ -57,10 +57,13 @@ lstm_model.eval()
 def build_features(df: pd.DataFrame):
     df = df.copy()
 
+    df['log_return'] = np.log(df['close'] / df['close'].shift(1))
     df['high-low'] = df['high'] - df['low']
     df['close-open'] = df['close'] - df['open']
-    df['rolling_mean_7'] = df['close'].rolling(7).mean()
-    df['rolling_std_7'] = df['close'].rolling(7).std()
+
+    df['ma_7'] = df['close'].rolling(7).mean()
+    df['ma_14'] = df['close'].rolling(14).mean()
+    df['std_7'] = df['close'].rolling(7).std()
 
     return df.dropna()
 
@@ -122,12 +125,17 @@ def predict_forecast(hist_df: pd.DataFrame, forecast_dates, n_forecast_days=7):
     if len(feat_df) < WINDOW_SIZE:
         raise ValueError("Not enough data for LSTM")
 
-    # LSTM forecast tuần tự
+    # chỉ lấy đúng feature model train
     lstm_input = feat_df[lstm_features].iloc[-WINDOW_SIZE:].copy()
+
+    # giữ price riêng (QUAN TRỌNG)
+    price_series = hist_df['close'].iloc[-len(feat_df):].reset_index(drop=True)
+
     pred_lstm_list = []
 
     for _ in range(n_forecast_days):
-        # scale input
+
+        # ================= SCALE =================
         if scaler_X is not None:
             X_scaled = scaler_X.transform(lstm_input.values)
         else:
@@ -135,23 +143,40 @@ def predict_forecast(hist_df: pd.DataFrame, forecast_dates, n_forecast_days=7):
 
         X_seq = torch.FloatTensor(X_scaled).unsqueeze(0)
 
+        # ================= PREDICT =================
         with torch.no_grad():
-            lstm_out = lstm_model(X_seq).numpy()[0, 0]
+            lstm_out = lstm_model(X_seq).cpu().numpy()[0]
 
-        # convert về USD
+        # multi-horizon output -> lấy mean ổn định
+        pred_log_return = float(np.mean(lstm_out))
+
+        # ================= INVERSE SCALE =================
         if scaler_y is not None:
-            lstm_pred = scaler_y.inverse_transform([[lstm_out]])[0, 0]
-        else:
-            last_price = lstm_input['close'].iloc[-1]
-            lstm_out = max(min(float(lstm_out), 0.05), -0.05)
-            lstm_pred = last_price * (1 + lstm_out)
+            pred_log_return = scaler_y.inverse_transform([[pred_log_return]])[0, 0]
 
-        pred_lstm_list.append(lstm_pred)
+        # ================= CONVERT TO PRICE =================
+        last_price = price_series.iloc[-1]
+        pred_price = last_price * np.exp(pred_log_return)
 
-        # update window cho next day
-        new_row = lstm_input.iloc[-1].copy()
-        new_row['close'] = lstm_pred
-        lstm_input = pd.concat([lstm_input.iloc[1:], new_row.to_frame().T], ignore_index=True)
+        pred_lstm_list.append(pred_price)
+
+        # ================= UPDATE PRICE SERIES =================
+        price_series = pd.concat(
+            [price_series, pd.Series([pred_price])],
+            ignore_index=True
+        )
+
+        # ================= REBUILD FEATURES (IMPORTANT FIX) =================
+        temp_df = hist_df.copy()
+        temp_df = pd.concat(
+            [temp_df, pd.DataFrame([{"close": pred_price}])],
+            ignore_index=True
+        )
+
+        feat_df = build_features(temp_df)
+        feat_df.columns = feat_df.columns.str.lower()
+
+        lstm_input = feat_df[lstm_features].iloc[-WINDOW_SIZE:].copy()
 
     # ================= COMBINE =================
     last_price = hist_df['close'].iloc[-1]  # giá gốc cuối cùng
