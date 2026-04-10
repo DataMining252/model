@@ -124,7 +124,7 @@ class LSTMModel(nn.Module):
 
 model = LSTMModel(len(features))
 
-# ✅ FIX LOSS
+# FIX LOSS
 criterion = nn.HuberLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 
@@ -152,23 +152,36 @@ for epoch in range(EPOCHS):
     if val_loss < best_val_loss:
         best_val_loss = val_loss
         patience_counter = 0
-        torch.save(model.state_dict(), MODEL_PATH)
+        torch.save({
+            "model_state_dict": model.state_dict(),
+            "input_features": features,
+            "scaler_X": scaler_X,
+            "scaler_y": scaler_y,
+            "window_size": WINDOW_SIZE,
+            "horizon": HORIZON
+        }, MODEL_PATH)
     else:
         patience_counter += 1
         if patience_counter >= PATIENCE:
             print("Early stopping!")
             break
 
-model.load_state_dict(torch.load(MODEL_PATH))
+checkpoint = torch.load(MODEL_PATH, map_location="cpu", weights_only=False)
+model.load_state_dict(checkpoint["model_state_dict"])
+features = checkpoint["input_features"]
+scaler_X = checkpoint["scaler_X"]
+scaler_y = checkpoint["scaler_y"]
+WINDOW_SIZE = checkpoint["window_size"]
+HORIZON = checkpoint["horizon"]
+
+model.eval()
 
 # ======================
 # PREDICT
 # ======================
-model.eval()
 with torch.no_grad():
-    y_pred_scaled = model(X_test).numpy()
-
-y_test_np = y_test.numpy()
+    y_pred_scaled = model(X_test).detach().cpu().numpy()
+    y_test_np = y_test.detach().cpu().numpy()
 
 # ======================
 # INVERSE SCALE
