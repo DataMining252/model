@@ -228,24 +228,67 @@ print("\nBias:", bias)
 # ======================
 # PLOT
 # ======================
-fig, axes = plt.subplots(4, 2, figsize=(15,12))
+import numpy as np
+import matplotlib.pyplot as plt
+
+fig, axes = plt.subplots(4, 2, figsize=(15, 12))
 axes = axes.flatten()
 
 for i in range(HORIZON):
-    ax = axes[i]
     actual = y_true_price[:, i]
     pred = y_pred_price[:, i]
 
+    # ======================
+    # LINE PLOT (Left side)
+    # ======================
+    ax = axes[i]
     ax.plot(actual[-100:], label="Actual")
     ax.plot(pred[-100:], linestyle="--", label="Predicted")
 
-    ax.set_title(f"Day +{i+1}")
+    ax.set_title(f"Day +{i+1} (Line)")
     ax.grid(True)
 
-fig.delaxes(axes[7])
-handles, labels = axes[0].get_legend_handles_labels()
-fig.legend(handles, labels)
+# remove unused subplot (if HORIZON < 8)
+if HORIZON < 8:
+    fig.delaxes(axes[7])
+
+# ======================
+# SCATTER FULL HORIZON
+# ======================
+fig2, axes2 = plt.subplots(4, 2, figsize=(15, 12))
+axes2 = axes2.flatten()
+
+for i in range(HORIZON):
+    ax = axes2[i]
+
+    actual = y_true_price[:, i]
+    pred = y_pred_price[:, i]
+
+    ax.scatter(actual, pred, alpha=0.4)
+
+    # đường y = x
+    min_v = min(actual.min(), pred.min())
+    max_v = max(actual.max(), pred.max())
+    ax.plot([min_v, max_v], [min_v, max_v], 'r--')
+
+    ax.set_title(f"Day +{i+1} (Scatter)")
+    ax.set_xlabel("Actual")
+    ax.set_ylabel("Predicted")
+    ax.grid(True)
+
+# remove unused axis nếu HORIZON < 8
+for j in range(HORIZON, 8):
+    fig2.delaxes(axes2[j])
 
 plt.tight_layout()
-plt.savefig(SAVE_DIR / "lstm_line_plot.png")
-plt.close()
+
+# ======================
+# SAVE
+# ======================
+SAVE_DIR.mkdir(parents=True, exist_ok=True)
+
+fig.savefig(SAVE_DIR / "lstm_line_plot.png", dpi=300, bbox_inches="tight")
+fig2.savefig(SAVE_DIR / "lstm_scatter_plot.png", dpi=300, bbox_inches="tight")
+
+plt.close(fig)
+plt.close(fig2)
